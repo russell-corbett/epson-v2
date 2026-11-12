@@ -1,0 +1,21 @@
+send_command:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: epson_escvp21
+    command:
+      required: true
+      example: "PWR?"
+      selector:
+        text:
+    timeout:
+      required: false
+      selector:
+        number:
+          min: 0.5
+          max: 60
+          step: 0.5
+          unit_of_measurement: s
+          mode: box

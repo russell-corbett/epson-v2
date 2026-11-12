@@ -1,0 +1,130 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Epson projector over ESC/VP21",
+        "description": "Connect to the serial-to-TCP bridge wired to the projector's RS-232C port. The projector can be off; its serial number is picked up the next time it is on.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "name": "Name"
+        },
+        "data_description": {
+          "host": "IP address or hostname of the serial-to-TCP bridge.",
+          "port": "TCP port of the bridge (TCP Server mode).",
+          "name": "Name for the projector device."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "no_response": "Connected, but the projector did not answer PWR?. Check the cable, baud rate (9600 8N1) and that the bridge is in transparent mode.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "scan_interval": "Poll interval"
+        },
+        "data_description": {
+          "scan_interval": "How often PWR? is polled, in seconds. Other values are read on the same cycle while the projector is on."
+        }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "switch_to_hdmi1": {
+        "name": "Switch to HDMI1"
+      }
+    },
+    "select": {
+      "source": {
+        "name": "Input"
+      },
+      "color_mode": {
+        "name": "Color mode"
+      },
+      "aspect": {
+        "name": "Aspect"
+      },
+      "lamp_mode": {
+        "name": "Lamp mode"
+      }
+    },
+    "sensor": {
+      "lamp_hours": {
+        "name": "Lamp hours"
+      },
+      "power_state": {
+        "name": "Power state",
+        "state": {
+          "standby": "Standby",
+          "on": "On",
+          "warming_up": "Warming up",
+          "cooling_down": "Cooling down",
+          "standby_network": "Standby (network on)",
+          "abnormal_standby": "Abnormal standby",
+          "unknown_code": "Unknown"
+        }
+      },
+      "error": {
+        "name": "Error"
+      }
+    }
+  },
+  "exceptions": {
+    "update_failed": {
+      "message": "Projector not responding: {error}"
+    },
+    "projector_busy": {
+      "message": "The projector is warming up or cooling down and ignores commands. Try again shortly."
+    },
+    "command_rejected": {
+      "message": "The projector rejected {command} (ERR)."
+    },
+    "command_failed": {
+      "message": "Sending {command} failed: {error}"
+    },
+    "invalid_source": {
+      "message": "Unknown input: {source}"
+    },
+    "invalid_option": {
+      "message": "Unknown option: {option}"
+    },
+    "invalid_command": {
+      "message": "Not a valid ESC/VP21 command: {command}"
+    },
+    "entry_not_found": {
+      "message": "No loaded Epson ESC/VP21 entry with ID {entry_id}."
+    },
+    "entry_required": {
+      "message": "More than one (or no) projector is set up; pass config_entry_id."
+    }
+  },
+  "services": {
+    "send_command": {
+      "name": "Send command",
+      "description": "Sends a raw ESC/VP21 command (for example PWR? or SOURCE 30) and returns the projector's reply.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Projector",
+          "description": "Projector to send to. Optional when only one is set up."
+        },
+        "command": {
+          "name": "Command",
+          "description": "ESC/VP21 command without the trailing carriage return. Commands ending in ? are queries."
+        },
+        "timeout": {
+          "name": "Timeout",
+          "description": "Seconds to wait for the reply."
+        }
+      }
+    }
+  }
+}

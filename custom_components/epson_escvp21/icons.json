@@ -1,0 +1,17 @@
+{
+  "entity": {
+    "button": { "switch_to_hdmi1": { "default": "mdi:video-input-hdmi" } },
+    "select": {
+      "source": { "default": "mdi:video-input-hdmi" },
+      "color_mode": { "default": "mdi:palette" },
+      "aspect": { "default": "mdi:aspect-ratio" },
+      "lamp_mode": { "default": "mdi:lightbulb-on-outline" }
+    },
+    "sensor": {
+      "lamp_hours": { "default": "mdi:lightbulb-on-outline" },
+      "power_state": { "default": "mdi:power" },
+      "error": { "default": "mdi:alert-circle-outline" }
+    }
+  },
+  "services": { "send_command": { "service": "mdi:console" } }
+}
