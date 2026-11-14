@@ -18,7 +18,10 @@ MAX_SCAN_INTERVAL: Final = 300
 
 # Lamp hours change slowly; poll them far less often than the rest.
 LAMP_POLL_INTERVAL: Final = timedelta(minutes=10)
-# While the projector is not on, ERR? is checked this often.
+# In standby LAMP? still answers; read it at startup and this often.
+LAMP_POLL_INTERVAL_OFF: Final = timedelta(hours=3)
+# While the projector is not on, ERR? is tried at startup and this often.
+# (The 6030UB answers ERR in standby; the last known value is then kept.)
 ERR_POLL_INTERVAL_OFF: Final = timedelta(minutes=5)
 
 # Consecutive failed polls before entities are marked unavailable.
@@ -72,10 +75,15 @@ SOURCES: Final[dict[str, str]] = {
     "A0": "HDMI2",
 }
 
-# Not yet confirmed for this model -- intentionally empty. Live value seen: 06.
+# Static code -> name maps. These options exist from startup, before the
+# projector has ever been on. Codes the projector reports that are not listed
+# here are learned, persisted across restarts and shown as "Code XX".
+#
+# CMODE: awaiting the owner's confirmed list for the Pro Cinema 6030UB.
+# Live value seen: 06.
 CMODES: Final[dict[str, str]] = {}
 
-# Not yet confirmed for this model -- intentionally empty. Live value seen: 00.
+# ASPECT: not yet confirmed for this model. Live value seen: 00.
 ASPECTS: Final[dict[str, str]] = {}
 
 # Supplied by the owner, still to be verified against Epson's command list.

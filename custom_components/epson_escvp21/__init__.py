@@ -5,11 +5,12 @@ from __future__ import annotations
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .client import EscVp21Client
 from .const import DOMAIN
-from .coordinator import EpsonConfigEntry, EpsonCoordinator
+from .coordinator import EpsonConfigEntry, EpsonCoordinator, codes_store_key
 from .services import async_setup_services
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -32,6 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EpsonConfigEntry) -> boo
     """Set up a projector from a config entry."""
     client = EscVp21Client(entry.data[CONF_HOST], entry.data[CONF_PORT])
     coordinator = EpsonCoordinator(hass, entry, client)
+    await coordinator.async_load_codes()
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception:
@@ -45,5 +47,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: EpsonConfigEntry) -> boo
 async def async_unload_entry(hass: HomeAssistant, entry: EpsonConfigEntry) -> bool:
     """Unload a config entry and close the connection."""
     if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        await entry.runtime_data.async_save_codes()
         await entry.runtime_data.client.close()
     return unloaded
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: EpsonConfigEntry) -> None:
+    """Delete the learned codes when the entry is removed."""
+    await Store(hass, 1, codes_store_key(entry.entry_id)).async_remove()

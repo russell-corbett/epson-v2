@@ -6,8 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
-    SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
 )
@@ -40,6 +40,8 @@ class EpsonSensorDescription(SensorEntityDescription):
     """Describes a projector sensor."""
 
     value_fn: Callable[[ProjectorData], str | int | None]
+    # Show the value from before a restart until the projector answers.
+    restore: bool = False
 
 
 SENSORS: tuple[EpsonSensorDescription, ...] = (
@@ -52,6 +54,7 @@ SENSORS: tuple[EpsonSensorDescription, ...] = (
         suggested_display_precision=0,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda data: data.lamp_hours,
+        restore=True,
     ),
     EpsonSensorDescription(
         key="power_state",
@@ -65,6 +68,7 @@ SENSORS: tuple[EpsonSensorDescription, ...] = (
         translation_key="error",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_error,
+        restore=True,
     ),
 )
 
@@ -80,7 +84,7 @@ async def async_setup_entry(
     )
 
 
-class EpsonSensor(EpsonEntity, SensorEntity):
+class EpsonSensor(EpsonEntity, RestoreSensor):
     """A projector sensor."""
 
     entity_description: EpsonSensorDescription
@@ -91,8 +95,23 @@ class EpsonSensor(EpsonEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator, description.key)
         self.entity_description = description
+        self._restored: str | int | float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last value for sensors that keep one."""
+        await super().async_added_to_hass()
+        if not self.entity_description.restore:
+            return
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            value = last.native_value
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+            self._restored = value
 
     @property
-    def native_value(self) -> str | int | None:
-        """Return the sensor value."""
-        return self.entity_description.value_fn(self.coordinator.data)
+    def native_value(self) -> str | int | float | None:
+        """Return the live value, else the one from before the restart."""
+        value = self.entity_description.value_fn(self.coordinator.data)
+        if value is None and self.entity_description.restore:
+            return self._restored
+        return value

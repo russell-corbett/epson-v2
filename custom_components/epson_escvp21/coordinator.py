@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -34,6 +35,7 @@ from .const import (
     KEY_SERIAL,
     KEY_SOURCE,
     LAMP_POLL_INTERVAL,
+    LAMP_POLL_INTERVAL_OFF,
     MAX_CONSECUTIVE_FAILURES,
     PWR_BUSY,
     PWR_ON,
@@ -43,6 +45,18 @@ _LOGGER = logging.getLogger(__name__)
 
 # Queried on every cycle while the projector is on.
 ON_KEYS = (KEY_SOURCE, KEY_CMODE, KEY_LUMINANCE, KEY_ASPECT, KEY_ERROR)
+# Keys whose learned codes are remembered for the select entities.
+SELECT_KEYS = frozenset({KEY_SOURCE, KEY_CMODE, KEY_LUMINANCE, KEY_ASPECT})
+# A rejection never clears these; the last known value is kept.
+STICKY_KEYS = frozenset({KEY_LAMP, KEY_ERROR})
+
+CODES_STORE_VERSION = 1
+CODES_SAVE_DELAY = 10  # seconds
+
+
+def codes_store_key(entry_id: str) -> str:
+    """Storage key for an entry's learned codes."""
+    return f"{DOMAIN}.{entry_id}.codes"
 
 type EpsonConfigEntry = ConfigEntry[EpsonCoordinator]
 
@@ -85,10 +99,12 @@ class EpsonCoordinator(DataUpdateCoordinator[ProjectorData]):
         )
         self.client = client
         self.consecutive_failures = 0
-        # Codes seen per key, so unknown codes stay selectable.
+        # Codes seen per select key, persisted so unnamed codes stay selectable.
         self.seen_codes: dict[str, set[str]] = {}
-        self._last_lamp_poll: datetime | None = None
-        self._last_err_poll: datetime | None = None
+        self._last_poll: dict[str, datetime] = {}
+        self._codes_store: Store[dict[str, dict[str, list[str]]]] = Store(
+            hass, CODES_STORE_VERSION, codes_store_key(entry.entry_id)
+        )
         self._rejections: dict[str, int] = {}
         # Some models only answer SNO? while on; retry it after power-on.
         self._serial_rejected = False
@@ -119,21 +135,18 @@ class EpsonCoordinator(DataUpdateCoordinator[ProjectorData]):
             self._serial_rejected = False
             self._last_power = power
 
+        # LAMP and ERR are also read at startup and periodically in standby,
+        # so their sensors have a value without the projector being on.
         if power == PWR_ON:
-            keys = list(ON_KEYS)
-            lamp_due = (
-                self._last_lamp_poll is None
-                or now - self._last_lamp_poll >= LAMP_POLL_INTERVAL
-            )
-            if lamp_due:
-                keys.append(KEY_LAMP)
+            keys = list(ON_KEYS)  # includes ERR every cycle
+            lamp_interval = LAMP_POLL_INTERVAL
         else:
             keys = []
-            if (
-                self._last_err_poll is None
-                or now - self._last_err_poll >= ERR_POLL_INTERVAL_OFF
-            ):
+            if self._due(KEY_ERROR, ERR_POLL_INTERVAL_OFF, now):
                 keys.append(KEY_ERROR)
+            lamp_interval = LAMP_POLL_INTERVAL_OFF
+        if self._due(KEY_LAMP, lamp_interval, now):
+            keys.append(KEY_LAMP)
         if data.serial is None and not self._serial_rejected:
             keys.append(KEY_SERIAL)
 
@@ -143,6 +156,11 @@ class EpsonCoordinator(DataUpdateCoordinator[ProjectorData]):
             except CommandRejected:
                 if key == KEY_SERIAL:
                     self._serial_rejected = True
+                    continue
+                self._last_poll[key] = now
+                if key in STICKY_KEYS:
+                    # e.g. ERR? in standby on the 6030UB: keep the last value.
+                    _LOGGER.debug("%s? rejected; keeping last value", key)
                     continue
                 # On a shared bus a lone ERR may have been another client's.
                 # Only clear a known value after it is rejected twice in a row.
@@ -159,9 +177,14 @@ class EpsonCoordinator(DataUpdateCoordinator[ProjectorData]):
                 break
             else:
                 self._rejections.pop(key, None)
-            self._store(data, key, value, now)
+                self._last_poll[key] = now
+            self._store(data, key, value)
 
         return data
+
+    def _due(self, key: str, interval: timedelta, now: datetime) -> bool:
+        last = self._last_poll.get(key)
+        return last is None or now - last >= interval
 
     @staticmethod
     def _has_value(data: ProjectorData, key: str) -> bool:
@@ -171,11 +194,8 @@ class EpsonCoordinator(DataUpdateCoordinator[ProjectorData]):
             return data.serial is not None
         return data.values.get(key) is not None
 
-    def _store(
-        self, data: ProjectorData, key: str, value: str | None, now: datetime
-    ) -> None:
+    def _store(self, data: ProjectorData, key: str, value: str | None) -> None:
         if key == KEY_LAMP:
-            self._last_lamp_poll = now
             try:
                 data.lamp_hours = int(value) if value is not None else None
             except ValueError:
@@ -186,11 +206,35 @@ class EpsonCoordinator(DataUpdateCoordinator[ProjectorData]):
                 data.serial = value
                 self._learned_serial(value)
             return
-        if key == KEY_ERROR:
-            self._last_err_poll = now
         data.values[key] = value
-        if value is not None:
-            self.seen_codes.setdefault(key, set()).add(value)
+        if value is not None and key in SELECT_KEYS:
+            codes = self.seen_codes.setdefault(key, set())
+            if value not in codes:
+                codes.add(value)
+                self._codes_store.async_delay_save(self._codes_data, CODES_SAVE_DELAY)
+
+    async def async_load_codes(self) -> None:
+        """Load codes learned in earlier runs."""
+        stored = await self._codes_store.async_load()
+        if not stored:
+            return
+        for key, codes in stored.get("seen_codes", {}).items():
+            if key in SELECT_KEYS:
+                self.seen_codes.setdefault(key, set()).update(
+                    str(code) for code in codes
+                )
+
+    async def async_save_codes(self) -> None:
+        """Write learned codes now (on unload/reload)."""
+        if self.seen_codes:
+            await self._codes_store.async_save(self._codes_data())
+
+    def _codes_data(self) -> dict[str, dict[str, list[str]]]:
+        return {
+            "seen_codes": {
+                key: sorted(codes) for key, codes in self.seen_codes.items()
+            }
+        }
 
     def _handle_failure(self, err: EscVp21Error) -> ProjectorData:
         """Keep the last known state until failures pile up."""
