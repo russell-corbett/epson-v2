@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
@@ -14,7 +12,6 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.epson_escvp21.const import (
     DOMAIN,
-    KEY_ERROR,
     KEY_LAMP,
     LAMP_POLL_INTERVAL_OFF,
 )
@@ -53,24 +50,24 @@ async def test_standby_startup_reads_lamp(
     """In standby LAMP? answers, so lamp hours are known straight away."""
     projector.state["PWR"] = "00"
     entry = await _setup(hass, projector)
-    assert projector.received[:3] == ["PWR?", "ERR?", "LAMP?"]
+    assert projector.received[:2] == ["PWR?", "LAMP?"]
+    assert "ERR?" not in projector.received
     assert hass.states.get(LAMP).state == "1275"
-    # ERR? is rejected in standby (as on the real 6030UB) and nothing is known.
+    # Never polled in standby and nothing to restore yet.
     assert hass.states.get(ERROR).state == STATE_UNKNOWN
 
-    # Neither is retried on the next cycles...
+    # LAMP? is not repeated on the next cycles...
     projector.received.clear()
     await _refresh(hass, entry)
     await _refresh(hass, entry)
     assert projector.received == ["PWR?", "PWR?"]
 
-    # ...until their standby intervals pass.
+    # ...until its standby interval passes. ERR? is never sent while off.
     coordinator = entry.runtime_data
     coordinator._last_poll[KEY_LAMP] -= LAMP_POLL_INTERVAL_OFF
-    coordinator._last_poll[KEY_ERROR] -= timedelta(minutes=5)
     projector.state["LAMP"] = "1276"
     await _refresh(hass, entry)
-    assert projector.received[2:] == ["PWR?", "ERR?", "LAMP?"]
+    assert projector.received[2:] == ["PWR?", "LAMP?"]
     assert hass.states.get(LAMP).state == "1276"
     await hass.config_entries.async_unload(entry.entry_id)
 
@@ -91,8 +88,7 @@ async def test_lamp_err_in_standby_is_graceful(
     for _ in range(3):
         await _refresh(hass, entry)
     assert "LAMP?" in projector.received[-4:]
-    assert "ERR?" in projector.received
-    # Both rejected while off; last known values are kept.
+    # LAMP? rejected while off; last known values are kept.
     assert hass.states.get(LAMP).state == "1275"
     assert hass.states.get(ERROR).state == "OK"
     assert coordinator.last_update_success
@@ -198,4 +194,45 @@ async def test_static_names_used_as_options(
         "select", "select_option", {"entity_id": CMODE, "option": "Natural"}, blocking=True
     )
     assert "CMODE 07" in projector.received
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_error_sensor_only_polled_while_on(
+    hass: HomeAssistant, projector: FakeProjector, fast_client
+) -> None:
+    """ERR? only while PWR=01; the value is held through standby."""
+    entry = await _setup(hass, projector)
+    assert hass.states.get(ERROR).state == "OK"
+    coordinator = entry.runtime_data
+
+    for pwr in ("03", "00", "04", "02"):
+        projector.state["PWR"] = pwr
+        projector.received.clear()
+        await _refresh(hass, entry)
+        assert "ERR?" not in projector.received
+        assert hass.states.get(ERROR).state == "OK"
+
+    projector.state["PWR"] = "01"
+    projector.state["ERR"] = "04"
+    await _refresh(hass, entry)
+    assert hass.states.get(ERROR).state == "Code 04"
+    assert coordinator.consecutive_failures == 0
+    await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_rejected_err_is_not_a_failure(
+    hass: HomeAssistant, projector: FakeProjector, fast_client
+) -> None:
+    """The bare ERR reply to ERR? keeps the value and never counts as a failure."""
+    entry = await _setup(hass, projector)
+    coordinator = entry.runtime_data
+    original = projector.respond
+    projector.respond = lambda c: b"ERR\r:" if c == "ERR?" else original(c)
+    for _ in range(5):
+        await _refresh(hass, entry)
+    assert hass.states.get(ERROR).state == "OK"
+    assert coordinator.consecutive_failures == 0
+    assert coordinator.last_update_success
+    assert coordinator.client.connected
+    assert coordinator.client.stats.connects == 1
     await hass.config_entries.async_unload(entry.entry_id)

@@ -25,7 +25,6 @@ from .const import (
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    ERR_POLL_INTERVAL_OFF,
     KEY_ASPECT,
     KEY_CMODE,
     KEY_ERROR,
@@ -135,15 +134,15 @@ class EpsonCoordinator(DataUpdateCoordinator[ProjectorData]):
             self._serial_rejected = False
             self._last_power = power
 
-        # LAMP and ERR are also read at startup and periodically in standby,
-        # so their sensors have a value without the projector being on.
+        # ERR? is only asked while on: the 6030UB rejects it in standby, and
+        # the Error sensor keeps (and restores) its last value meanwhile.
+        # LAMP? does answer in standby, so it is read at startup and
+        # periodically there too.
         if power == PWR_ON:
             keys = list(ON_KEYS)  # includes ERR every cycle
             lamp_interval = LAMP_POLL_INTERVAL
         else:
             keys = []
-            if self._due(KEY_ERROR, ERR_POLL_INTERVAL_OFF, now):
-                keys.append(KEY_ERROR)
             lamp_interval = LAMP_POLL_INTERVAL_OFF
         if self._due(KEY_LAMP, lamp_interval, now):
             keys.append(KEY_LAMP)
@@ -159,7 +158,7 @@ class EpsonCoordinator(DataUpdateCoordinator[ProjectorData]):
                     continue
                 self._last_poll[key] = now
                 if key in STICKY_KEYS:
-                    # e.g. ERR? in standby on the 6030UB: keep the last value.
+                    # A rejection is not a fault: keep the last known value.
                     _LOGGER.debug("%s? rejected; keeping last value", key)
                     continue
                 # On a shared bus a lone ERR may have been another client's.

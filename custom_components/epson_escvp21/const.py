@@ -20,9 +20,6 @@ MAX_SCAN_INTERVAL: Final = 300
 LAMP_POLL_INTERVAL: Final = timedelta(minutes=10)
 # In standby LAMP? still answers; read it at startup and this often.
 LAMP_POLL_INTERVAL_OFF: Final = timedelta(hours=3)
-# While the projector is not on, ERR? is tried at startup and this often.
-# (The 6030UB answers ERR in standby; the last known value is then kept.)
-ERR_POLL_INTERVAL_OFF: Final = timedelta(minutes=5)
 
 # Consecutive failed polls before entities are marked unavailable.
 MAX_CONSECUTIVE_FAILURES: Final = 3

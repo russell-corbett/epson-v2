@@ -53,10 +53,10 @@ To name color mode or aspect codes, add them to `CMODES` / `ASPECTS` in `custom_
 
 - `PWR?` every cycle.
 - While on: `SOURCE?`, `CMODE?`, `LUMINANCE?`, `ASPECT?` and `ERR?` every cycle, plus `LAMP?` every 10 minutes.
-- While off: `PWR?` every cycle, `ERR?` at startup and every 5 minutes, and `LAMP?` at startup and every 3 hours.
+- While off: `PWR?` every cycle and `LAMP?` at startup and every 3 hours. `ERR?` is not sent.
 - After any set command, a refresh is requested.
 
-The 6030UB answers `LAMP?` in standby, but answers `ERR?` with `ERR`. If `LAMP?` or `ERR?` is rejected, the last known value is kept. Lamp hours and Error restore their values after a Home Assistant restart.
+The 6030UB rejects `ERR?` in standby, so `ERR?` is only sent while the projector is on. The Error sensor keeps its last value while the projector is off. Lamp hours and Error both restore their values after a Home Assistant restart. If either query is rejected, it isn't treated as a fault or a lost connection: the last value is kept.
 
 Color mode, aspect, lamp mode and input codes that the projector reports, but that have no name in `const.py`, are saved to Home Assistant's storage. They stay available as `Code XX` options after a restart, even while the projector is off.
 
